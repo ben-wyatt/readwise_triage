@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv
+
+# Local environment files
+.env
+
+# Node dependencies
+node_modules/
+
+# Generated output
+output/
+
+# Local editor/agent config
+.claude/settings.local.json
+
+# Nested repo metadata
+python/.git/
+
+# OS files
+.DS_Store
