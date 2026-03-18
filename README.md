@@ -49,6 +49,19 @@ What do I want from my algo:
 - could I do some amount of LLM pre-parsing to get rid of dumb shit?
 - the proper way to set this up is to apply tags to documents and then in the readwise app create filtered views 
 
+## source types and prioritization
+
+The Readwise API surfaces source type via the `category` field on each document. The current implementation only fetches `category: "rss"` items. Known category values include:
+
+- `rss` — standard RSS/Atom feed items (the current default)
+- `email` — email newsletters (e.g. Substack, Revue)
+- `article` — documents manually saved by the user (browser extension, share sheet, etc.)
+- `tweet`, `pdf`, `epub` — other ingested content types
+
+**User-inputted documents (`category: "article"`) should receive a scoring boost** relative to passively ingested feed content. When a user explicitly saves something, it signals intent and interest that automated feeds do not carry. A future scoring component should detect `category === "article"` (or a configurable set of categories) and apply a multiplicative priority bonus, similar to the existing read-history bonus.
+
+Extending the fetcher to also pull `email` documents would capture newsletters, which share the "infrequent but high-value" profile that the frequency curve is designed to reward.
+
 ## next steps
 
 think through design spec: just_in, long_reads, short_blogs, general.
