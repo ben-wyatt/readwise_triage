@@ -1,0 +1,9 @@
+name = "share-api"
+main = "src/index.ts"
+compatibility_date = "2025-03-27"
+
+# KV namespace for job status and catch-all storage
+# Uncomment after creating: wrangler kv namespace create SHARE_KV
+# [[kv_namespaces]]
+# binding = "SHARE_KV"
+# id = "<your-kv-namespace-id>"
