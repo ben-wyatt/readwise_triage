@@ -1,69 +1,123 @@
 # Readwise Feed Ranker
 
-Readwise Feed Ranker helps keep your Reader inbox focused by scoring feed items and promoting only the highest-signal articles, so frequent publishers do not drown out infrequent but valuable sources.
+Readwise Feed Ranker keeps a large Reader RSS inbox manageable by promoting a small, diverse set of articles instead of letting prolific publishers dominate the queue.
 
-The algorithm first computes a source frequency score from recent publishing volume (using a configurable curve) and then classifies each feed item into one primary bucket:
+## What it does
 
-- `just_in`: recent items inside the freshness window
-- `long_reads`: items above the long-read word-count threshold
-- `short_blogs`: items below the short-blog threshold
+The ranker reads documents with `category=rss` and `location=feed`, scores them, and assigns each document to one primary bucket:
+
+- `just_in`: published within the freshness window
+- `long_reads`: above the long-read word-count threshold
+- `short_blogs`: below the short-blog word-count threshold
 - `general`: everything else
 
-Items are ranked within their bucket using a continuous score built from source frequency, optional read-history, optional length, and a small recency component. Each bucket independently selects up to its configured maximum number of items, with no cross-bucket quota balancing or fallback pool.
+Source frequency is the main signal: infrequent publishers receive a higher base score. Recency and bucket fit provide smaller bonuses, while read-history and length bonuses can be enabled explicitly. Each bucket selects up to `MAX_ITEMS_PER_BUCKET` documents independently.
 
-- `READWISE_TOKEN`: Required Readwise API token used to read and update documents.
-- `SCORING_WINDOW_DAYS`: Number of past days used when counting each source's post frequency.
-- `MAX_ITEMS_PER_BUCKET`: Maximum number of items selected from each bucket per run.
-- `SCORE_CURVE`: Frequency-penalty curve (`sqrt`, `log`, or `linear`) applied to prolific sources.
-- `ENABLE_READ_HISTORY`: Enables a completion-rate boost based on what you typically finish reading.
-- `READ_HISTORY_WEIGHT`: Strength of the read-history boost when enabled.
-- `ENABLE_LENGTH_SIGNAL`: Enables a mild boost for longer articles.
-- `LENGTH_SIGNAL_WEIGHT`: Strength of the length-based boost when enabled.
-- `JUST_IN_DAYS`: Recency window used for the `just_in` bucket.
-- `LONG_READ_MIN_WORDS`: Minimum word count for the `long_reads` bucket.
-- `SHORT_BLOG_MAX_WORDS`: Maximum word count for the `short_blogs` bucket.
-- `PROMOTE_TAG`: Optional base tag added to promoted documents. Selected items also receive a bucket tag like `triage/just_in`.
-- `DRY_RUN`: If `true`, prints planned promotions without changing Readwise.
-- `OUTPUT_JSON_PATH`: File path where full ranking results are saved as JSON.
-- `READWISE_MAX_REQUESTS_PER_MIN`: Request throughput cap for API calls (default `240`, max `240`).
+In live mode, selected documents move to Reader's `new` location and retain their existing tags while gaining `triage` and `triage/<bucket>` tags.
 
-Run the program with `npm start`.
+This system currently ranks RSS documents; it does not perform LLM-based topical classification.
 
-The output JSON now includes the full global ranking, full within-bucket rankings, bucket summaries, and the selected items for each bucket.
+## Production architecture
 
-Readwise API calls are paced to stay under the documented cap, and `429` responses now use a short exponential backoff that starts around `2s` and ramps up on repeated retries instead of immediately sleeping for a long fixed interval.
+Production runs entirely on Cloudflare as the `readwise-triage` scheduled Worker in [`worker/`](worker/). GitHub Actions is not used; the former `.github/workflows/triage.yml` scheduler has been removed.
 
-[API Docs](https://readwise.io/reader_api)
+The Worker has two UTC Cron Triggers:
 
-## thoughts on implementation
+- `17 10 * * *`: daily incremental sync, scoring, and promotion at 10:17 UTC (5:17am EST / 6:17am EDT)
+- `15 * * * *`: bootstrap trigger that fetches five 100-document pages per run; after bootstrap completes it exits without calling Readwise
 
-I am taking an outcomes-oriented approach to this design -- like any good vibe code.
+Only those two cron expressions are accepted by the Worker. An unrecognized or retired trigger is logged and ignored before it can touch D1 or Readwise.
 
-What do I want from my algo:
-- a few different buckets. one for long reads, one for short blogs (tyler cowen)
-- upweigh infrequent posters
-- stay current: a "just-in" bucket that only shows the best posts from the last 2 weeks
-- each bucket should have at max 15 items and they should be the most relevant
-- the cron job should populate these buckets once a day.
-- I want more signals that I can work against. classification, maybe traffic/popularity
-- could I do some amount of LLM pre-parsing to get rid of dumb shit?
-- the proper way to set this up is to apply tags to documents and then in the readwise app create filtered views 
+Durable state lives in the `readwise-triage` D1 database:
 
-## source types and prioritization
+- `triage_documents`: incrementally synchronized Reader document snapshot
+- `triage_runs`: timing, counts, status, and errors for every execution
+- `triage_decisions`: bucket, score, rank, and promotion status for selected documents
+- `triage_state`: bootstrap cursor and last successful synchronization timestamp
 
-The Readwise API surfaces source type via the `category` field on each document. The current implementation only fetches `category: "rss"` items. Known category values include:
+Persistent Cloudflare invocation logs are enabled at 100% sampling. The encrypted `READWISE_TOKEN` Worker secret is the only production credential used at runtime.
 
-- `rss` — standard RSS/Atom feed items (the current default)
-- `email` — email newsletters (e.g. Substack, Revue)
-- `article` — documents manually saved by the user (browser extension, share sheet, etc.)
-- `tweet`, `pdf`, `epub` — other ingested content types
+### Current production state
 
-**User-inputted documents (`category: "article"`) should receive a scoring boost** relative to passively ingested feed content. When a user explicitly saves something, it signals intent and interest that automated feeds do not carry. A future scoring component should detect `category === "article"` (or a configurable set of categories) and apply a multiplicative priority bonus, similar to the existing read-history bonus.
+The D1 bootstrap completed on September 13, 2026, and live scheduled execution was verified end to end against Readwise. The normal daily and hourly triggers are deployed; the hourly trigger is now a safe no-op unless a new database must be bootstrapped.
 
-Extending the fetcher to also pull `email` documents would capture newsletters, which share the "infrequent but high-value" profile that the frequency curve is designed to reward.
+## Configuration
 
-## next steps
+Production configuration is committed in [`worker/wrangler.jsonc`](worker/wrangler.jsonc). Local credentials belong in ignored `.env` or `.dev.vars` files.
 
-think through design spec: just_in, long_reads, short_blogs, general.
+| Variable | Default | Purpose |
+|---|---:|---|
+| `DRY_RUN` | `false` in production | Skip Reader updates when `true` |
+| `SCORING_WINDOW_DAYS` | `14` | Window used to count source publishing frequency |
+| `MAX_ITEMS_PER_BUCKET` | `15` | Maximum selected documents per bucket |
+| `SCORE_CURVE` | `sqrt` | Frequency penalty: `sqrt`, `log`, or `linear` |
+| `JUST_IN_DAYS` | `14` | Freshness window for `just_in` |
+| `LONG_READ_MIN_WORDS` | `2500` | Minimum size for `long_reads` |
+| `SHORT_BLOG_MAX_WORDS` | `1200` | Maximum size for `short_blogs` |
+| `PROMOTE_TAG` | `triage` | Base tag added during promotion |
+| `READWISE_MAX_REQUESTS_PER_MIN` | `20` | Reader API request cap |
+| `BOOTSTRAP_MAX_PAGES_PER_RUN` | `5` | Pages fetched by each bootstrap invocation |
 
-assign classification tags using LLM on the document summary: topics should include AI, China, politics, etc etc. use 
+The Reader list and bulk-update endpoints are limited to 20 requests per minute, so the Worker clamps its throughput to that value and honors `Retry-After` responses.
+
+## Development
+
+Install dependencies and validate both runtimes:
+
+```sh
+npm ci
+npm test
+npm run typecheck
+npm run worker:typecheck
+```
+
+The local CLI remains useful for exploratory dry runs:
+
+```sh
+cp .env.example .env
+# Add READWISE_TOKEN to .env; DRY_RUN defaults to true.
+npm start
+```
+
+It prints the ranking and writes the complete report to `OUTPUT_JSON_PATH`.
+
+## Deploying
+
+From a clean checkout:
+
+```sh
+npm ci
+npm test
+npm run typecheck
+npm run worker:types
+npm run worker:typecheck
+npx wrangler d1 migrations apply readwise-triage --remote -c worker/wrangler.jsonc
+npx wrangler secret put READWISE_TOKEN -c worker/wrangler.jsonc
+npm run worker:deploy
+```
+
+Regenerate [`worker/worker-configuration.d.ts`](worker/worker-configuration.d.ts) whenever Worker bindings change. Changes to cron expressions must be made in both [`worker/wrangler.jsonc`](worker/wrangler.jsonc) and the cron allowlist in [`worker/src/index.ts`](worker/src/index.ts).
+
+## Operations
+
+Inspect recent executions:
+
+```sh
+npx wrangler d1 execute readwise-triage --remote -c worker/wrangler.jsonc \
+  --command "SELECT * FROM triage_runs ORDER BY started_at DESC LIMIT 20"
+```
+
+Tail live Worker events:
+
+```sh
+npx wrangler tail readwise-triage -c worker/wrangler.jsonc
+```
+
+## Possible future work
+
+- Add email newsletters and explicitly saved articles as configurable source categories.
+- Use completion history as an active ranking signal.
+- Add optional LLM-based topic tags such as AI, China, or politics.
+- Add Worker-level tests for bootstrap, incremental synchronization, and failure recovery.
+
+[Readwise Reader API documentation](https://readwise.io/reader_api)

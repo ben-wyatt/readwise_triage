@@ -5,8 +5,12 @@
   "main": "index.js",
   "scripts": {
     "start": "tsx src/index.ts",
-    "test": "tsx --test src/**/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm test && npm run typecheck && npm run worker:typecheck",
+    "worker:types": "wrangler types worker/worker-configuration.d.ts -c worker/wrangler.jsonc",
+    "worker:typecheck": "tsc --noEmit -p worker/tsconfig.json",
+    "worker:deploy": "wrangler deploy -c worker/wrangler.jsonc"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +19,7 @@
   "devDependencies": {
     "@types/node": "^25.3.5",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.131.1"
   }
 }

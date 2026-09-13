@@ -1,0 +1,45 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "readwise-triage",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-11",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "readwise-triage",
+      "database_id": "925b8c91-0c3b-4be3-90d4-aa245f0ed02d",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": ["17 10 * * *", "15 * * * *"]
+  },
+  "vars": {
+    "DRY_RUN": "false",
+    "SCORING_WINDOW_DAYS": "14",
+    "MAX_ITEMS_PER_BUCKET": "15",
+    "SCORE_CURVE": "sqrt",
+    "ENABLE_READ_HISTORY": "false",
+    "READ_HISTORY_WEIGHT": "0.5",
+    "ENABLE_LENGTH_SIGNAL": "false",
+    "LENGTH_SIGNAL_WEIGHT": "0.2",
+    "JUST_IN_DAYS": "14",
+    "LONG_READ_MIN_WORDS": "2500",
+    "SHORT_BLOG_MAX_WORDS": "1200",
+    "PROMOTE_TAG": "triage",
+    "READWISE_MAX_REQUESTS_PER_MIN": "20",
+    "BOOTSTRAP_MAX_PAGES_PER_RUN": "5"
+  }
+}

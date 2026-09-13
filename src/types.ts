@@ -8,6 +8,7 @@ export interface ReaderDoc {
   location: string;
   published_date: string | null;
   created_at: string;
+  updated_at?: string;
   word_count: number | null;
   reading_progress: number;
   tags: Record<string, unknown>;

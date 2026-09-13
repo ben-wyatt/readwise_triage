@@ -13,6 +13,8 @@ wheels/
 
 # Local environment files
 .env
+.dev.vars
+.wrangler/
 
 # Node dependencies
 node_modules/
